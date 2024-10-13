@@ -1,0 +1,153 @@
+trigger: none 
+pr: none
+ 
+pool:
+  #vmImage: windows-latest
+  name: Hygien_BOT
+  demands:
+    - agent.name -equals pepwap25520W
+ 
+schedules:
+
+ 
+  - cron: '0 14 * * Fri'  # Schedule for every Friday 9AM CST
+    displayName: FTP Port
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: '0 11 * * Fri'  # Schedule for every Friday 6AM CST
+    displayName: Any Port
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: "0 18 * * 5" # Weekly Friday 12 AM CST
+    displayName: RouteTable Changes
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: "0 16 * * 5" # Weekly Friday 10 AM CST
+    displayName: NSG Changes
+    branches:
+      include:
+        - main
+    always: true
+  
+  - cron: "0 14 * * *" # Daily at 2 PM CST
+    displayName: ASG NSG Not Mappeed with correct RG
+    branches:
+      include:
+        - main
+    always: true
+  
+  - cron: "0 17 * * 5" # Weekly on Fridays at 11 AM CST
+    displayName: Empty Route Table
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: "0 22 * * *" # Daily at 4 PM CST
+    displayName: NSG without subnet and NIC
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: "0 0 * * *" # Daily at 6 PM CST
+    displayName: NSG IP Limit
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: "0 1 * * *" # Daily at 7 PM CST
+    displayName: NSG Rule Limit
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: "00 23 * * *" # Daily at 5 PM CST
+    displayName: NSG Without Common Rules
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: "00 03 * * *" # Daily at 9 PM CST
+    displayName: NSG Common Rules Modifications
+    branches:
+      include:
+        - main
+    always: true
+
+variables:
+- name: script
+
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'FTP Port') }}:
+    value: ./Main_functions/Reporting/azure_network_security_group_ftp_port_open_to_public_auditmode.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Any Port') }}:
+    value: ./Main_functions/Reporting/azure_network_security_group_any_port_open_to_public.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'NSG Changes') }}:
+    value: ./Main_functions/Reporting/azure_nsg_seven_days_modification_track_changes.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'RouteTable Changes') }}:
+    value: ./Main_functions/Reporting/azure_route_table_seven_days_modification_track_changes.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'ASG NSG Not Mappeed with correct RG') }}:
+    value: ./Main_functions/Reporting/azure_asg_nsg_not_mapped_with_correct_resource_group.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Empty Route Table') }}:
+    value: ./Main_functions/Reporting/azure_empty_route_table.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'NSG without subnet and NIC') }}:
+    value: ./Main_functions/Reporting/azure_nsg_without_subnet_and_network_interface_card.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'NSG IP Limit') }}:
+    value: ./Main_functions/Reporting/azure_nsg_ip_limit.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'NSG Rule Limit') }}:
+    value: ./Main_functions/Reporting/azure_nsg_rule_limit.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'NSG Without Common Rules') }}:
+    value: ./Main_functions/Reporting/azure_nsg_without_common_security_groups.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'NSG Common Rules Modifications') }}:
+    value: ./Main_functions/Reporting/azure_nsg_common_rule_modification_activity.py
+  
+jobs:
+- job: Build
+  timeoutInMinutes: 400  # Adjust the timeout as needed, e.g., 120 minutes
+  steps:      
+    - task: CmdLine@2
+      inputs:
+        script: |
+          "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe" -m pip install --upgrade pip
+          "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe" -m pip install -r ./Dependencies/Install_Modules.txt
+      displayName: 'Install Python Modules' 
+      
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: 'pep-prod-bot-automation-spn'
+        scriptType: 'ps'
+        scriptLocation: 'inlineScript'
+        addSpnToEnvironment: true
+        inlineScript: |
+          $env:AZURE_TENANT_ID = $tenantId
+          $env:AZURE_CLIENT_ID = $servicePrincipalId
+          $env:AZURE_CLIENT_SECRET = $servicePrincipalKey
+          $env:AZURE_AUTHORITY_HOST = "login.microsoftonline.com"
+          python ${{ variables.script }}
+  
+    - task: SendEmail@1
+      displayName: 'Email Notification on Failure'
+      condition: failed()  # This condition triggers the task only if the previous step failed
+      inputs:
+        To: 'DL-TeamGlobalCloudServicesandSecurity@pepsico.com'
+        From: 'CloudBot@pepsico.com'
+        Subject: 'Pipeline Failed: $(Build.DefinitionName)- $(Build.BuildNumber)'
+        Body: |
+          The Azure Pipeline $(Build.DefinitionName)-$(Build.BuildNumber) has failed.
+          Build URI: $(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)
+        SmtpServer: 'relay.pepsico.com'
+        SmtpPort: '25'
+        UseSSL: false
+      

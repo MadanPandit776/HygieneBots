@@ -1,0 +1,99 @@
+trigger: none 
+pr: none
+
+pool:
+  name: Hygien_BOT
+  demands:
+    - agent.name -equals pepwap25520W
+  
+ 
+schedules:
+
+  - cron: '0 8 * * *'  # Schedule for every day 2AM CST
+    displayName: 'RBAC'
+    branches:
+      include:
+        - main
+    always: true
+  
+  - cron: '0 9 * * *'  # Schedule for every day 3AM CST
+    displayName: 'Subscriptions RBAC Limit'
+    branches:
+      include:
+        - main
+    always: true
+  
+  - cron: '30 09 * * *'  # Daily 3:30 AM CST schedule
+    displayName: 'Unknown RBAC Role'
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: '30 01 * * *'  # Daily 7:30 AM CST schedule
+    displayName: 'Priviledged Access Bot'
+    branches:
+      include:
+        - main
+    always: true
+  
+  - cron: '30 10 * * *'  # Daily 4:30 AM CST schedule
+    displayName: 'Policy Logs'
+    branches:
+      include:
+        - main
+    always: true
+
+variables:
+- name: script
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'RBAC') }}:
+    value: ./Main_functions/Reporting/azure_rbac_duplicate_access_details.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Subscriptions RBAC Limit') }}:
+    value: ./Main_functions/Reporting/azure_rbac_limit_on_subscription.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Unknown RBAC Role') }}:
+    value: ./Main_functions/Reporting/azure-unknown-rbac-role.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Priviledged Access Bot') }}:
+    value: ./Main_functions/Reporting/azure_priviledged_access_bot.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Policy Logs') }}:
+    value: ./Main_functions/Reporting/azure_policy_initiative_assignment_modified.py
+  
+jobs:
+- job: Build
+  timeoutInMinutes: 400  # Adjust the timeout as needed, e.g., 120 minutes
+  steps:
+    - task: CmdLine@2
+      displayName: 'Install Dependencies'
+      inputs:
+        script: |
+          python --version
+          "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe" -m pip install --upgrade pip
+          "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe" -m pip install -r ./Dependencies/Install_Modules.txt
+          
+    - task: AzureCLI@2
+      displayName: 'Main Function'
+      inputs:
+        azureSubscription: 'pep-prod-bot-automation-spn'
+        scriptType: 'ps'
+        scriptLocation: 'inlineScript'
+        addSpnToEnvironment: true
+        inlineScript: |
+          $env:AZURE_TENANT_ID = $tenantId
+          $env:AZURE_CLIENT_ID = $servicePrincipalId
+          $env:AZURE_CLIENT_SECRET = $servicePrincipalKey
+          $env:AZURE_AUTHORITY_HOST = "login.microsoftonline.com"
+          python ${{ variables.script }}
+
+
+    - task: SendEmail@1
+      displayName: 'Email Notification on Failure'
+      condition: failed()  # This condition triggers the task only if the previous step failed
+      inputs:
+        To: 'DL-TeamGlobalCloudServicesandSecurity@pepsico.com'
+        From: 'CloudBot@pepsico.com'
+        Subject: 'Pipeline Failed: $(Build.DefinitionName)- $(Build.BuildNumber)'
+        Body: |
+          The Azure Pipeline $(Build.DefinitionName)-$(Build.BuildNumber) has failed.
+          Build URI: $(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)
+        SmtpServer: 'relay.pepsico.com'
+        SmtpPort: '25'
+    #     UseSSL: false

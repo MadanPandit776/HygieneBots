@@ -1,0 +1,123 @@
+trigger: none
+pr: none
+ 
+pool:
+  name: Hygien_BOT
+  demands:
+    - agent.name -equals pepwap25520W
+ 
+schedules:  
+  - cron: '0 6 * * *'  # Schedule for every day 12AM CST
+    displayName: 'VM deletion activity log'
+    branches:
+      include:
+        - main
+    always: true
+    
+
+  - cron: '0 13 */2 * *'  # Schedule for every alternate days 7AM CST
+    displayName: 'VM Stopped'
+    branches:
+      include:
+        - main
+    always: true
+    
+
+  - cron: '0 15 2 * *' # Schedule for once a month(Second day) at 9AM CST
+    displayName: 'VM More ASG'
+    branches:
+      include:
+        - main
+    always: true
+    
+
+  - cron: '0 13 1,15 * *'  # Schedule for every 15 days at 8AM CST
+    displayName: 'VM no ASG'
+    branches:
+      include:
+        - main
+    always: true
+    
+
+  - cron: '0 11 * * Mon'  # Schedule for every Monday 6AM CST
+    displayName: 'Orphans Snapshot'
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: '30 14 * * *'  # Daily 8:30 AM CST schedule
+    displayName: 'VM Deallocated Activity'
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: '30 22 * * *'  # Daily 4:30 PM CST schedule
+    displayName: 'VM with ASR'
+    branches:
+      include:
+        - main
+    always: true
+
+  
+    
+ 
+ 
+variables:
+- name: script
+
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'VM deletion activity log') }}:
+    value: './Main_functions/Reporting/azure_vm_deletion_activity_log.py'
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'VM Stopped') }}:
+    value: './Main_functions/Reporting/azure_vm_stop_deallocated_status.py'
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'VM More ASG') }}:
+    value: './Main_functions/Reporting/azure_vm_with_more_asg.py'
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'VM no ASG') }}:
+    value: './Main_functions/Reporting/azure_vm_without_asg.py'
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Orphans Snapshot') }}:
+    value: './Main_functions/Reporting/azure_orphans_snapshot.py'
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'VM Deallocated Activity') }}:
+    value: './Main_functions/Reporting/azure_vm_stopped_activity.py'
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'VM with ASR') }}:
+    value: './Main_functions/Reporting/azure_vm_with_asr.py'
+  
+ 
+jobs:
+- job: Build
+  timeoutInMinutes: 400  # Adjust the timeout as needed, e.g., 120 minutes
+  steps:      
+    - task: CmdLine@2
+      inputs:
+        script: |
+          "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe" -m pip install --upgrade pip
+          "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe" -m pip install -r ./Dependencies/Install_Modules.txt
+      displayName: 'Install Python Modules' 
+      
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: 'pep-prod-bot-automation-spn'
+        scriptType: 'ps'
+        scriptLocation: 'inlineScript'
+        addSpnToEnvironment: true
+        inlineScript: |
+          $env:AZURE_TENANT_ID = $tenantId
+          $env:AZURE_CLIENT_ID = $servicePrincipalId
+          $env:AZURE_CLIENT_SECRET = $servicePrincipalKey
+          $env:AZURE_AUTHORITY_HOST = "login.microsoftonline.com"
+          python ${{ variables.script }}
+  
+    - task: SendEmail@1
+      displayName: 'Email Notification on Failure'
+      condition: failed()  # This condition triggers the task only if the previous step failed
+      inputs:
+        To: 'DL-TeamGlobalCloudServicesandSecurity@pepsico.com'
+        From: 'CloudBot@pepsico.com'
+        Subject: 'Pipeline Failed: $(Build.DefinitionName)- $(Build.BuildNumber)'
+        Body: |
+          The Azure Pipeline $(Build.DefinitionName)-$(Build.BuildNumber) has failed.
+          Build URI: $(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)
+        SmtpServer: 'relay.pepsico.com'
+        SmtpPort: '25'
+        UseSSL: false
+      

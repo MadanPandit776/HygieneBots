@@ -1,0 +1,94 @@
+trigger: none 
+pr: none
+ 
+pool:
+  # vmImage: windows-latest
+  name: Hygien_BOT
+  demands:
+    - agent.name -equals pepwap25520W
+ 
+schedules:
+  - cron: '0 20 1,15 * *'  # Schedule for every 15 days at 3PM CST
+    displayName: Vnet SharedServices
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: '0 01 2,16 * *'  # Schedule for every 15 days at 8PM CST
+    displayName: Private Endpoint
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: '0 12 * * *'  # Schedule for every day 6AM CST
+    displayName: Vnet DNS
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: '30 00 * * *'  # Schedule for every day 6.30PM CST
+    displayName: Private DNS Zone IP A records
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: '30 04 * * *'  # Schedule for every day 10.30 PM CST
+    displayName: Private DNS Zone Out of Standerd RG
+    branches:
+      include:
+        - main
+    always: true
+  
+variables:
+- group: SQL_CR_BLOB_CR
+- name: script
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Vnet SharedServices') }}:
+    value: ./Main_functions/Reporting/azure_vnet_details_without_shared_services_vnet.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Private Endpoint') }}:
+    value: ./Main_functions/Reporting/azure_private_endpoint_connection_status.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Vnet DNS') }}:
+    value: ./Main_functions/Reporting/azure_vnet_dns_standard_order_details.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Private DNS Zone IP A records') }}:
+    value: ./Main_functions/Reporting/azure_enterprises_private_endpoint_having_azure_A_record_associted_private_dns_zone.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Private DNS Zone Out of Standerd RG') }}:
+    value: ./Main_functions/Reporting/azure_private_dns_zones_outside_of_standard_rg.py
+ 
+steps:
+  - task: CmdLine@2
+    displayName: Unit Test
+    inputs:
+      script: |
+       python --version
+       "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe" -m pip install --upgrade pip
+       "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe" -m pip install -r ./Dependencies/Install_Modules.txt
+
+  - task: AzureCLI@2
+    inputs:
+      azureSubscription: 'pep-prod-bot-automation-spn'
+      scriptType: 'ps'
+      scriptLocation: 'inlineScript'
+      addSpnToEnvironment: true
+      inlineScript: |
+        $env:AZURE_TENANT_ID = $tenantId
+        $env:AZURE_CLIENT_ID = $servicePrincipalId
+        $env:AZURE_CLIENT_SECRET = $servicePrincipalKey
+        $env:AZURE_AUTHORITY_HOST = "login.microsoftonline.com"
+        python ${{ variables.script }}
+
+  - task: SendEmail@1
+    displayName: 'Email Notification on Failure'
+    condition: failed()  # This condition triggers the task only if the previous step failed
+    inputs:
+      To: 'DL-TeamGlobalCloudServicesandSecurity@pepsico.com'
+      From: 'CloudBot@pepsico.com'
+      Subject: 'Pipeline Failed: $(Build.DefinitionName)- $(Build.BuildNumber)'
+      Body: |
+        The Azure Pipeline $(Build.DefinitionName)-$(Build.BuildNumber) has failed.
+        Build URI: $(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)
+      SmtpServer: 'relay.pepsico.com'
+      SmtpPort: '25'
+  #     UseSSL: false

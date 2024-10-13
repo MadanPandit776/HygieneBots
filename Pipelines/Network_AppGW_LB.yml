@@ -1,0 +1,105 @@
+trigger: none 
+pr: none
+ 
+pool:
+  #vmImage: windows-latest
+  name: Hygien_BOT
+  demands:
+    - agent.name -equals pepwap25520W
+ 
+schedules:
+ 
+  - cron: '0 19 1-7,15-22 * Thu'  # Schedule for every first and third thursday at 2PM CST
+    displayName: AppGW 100
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: '0 11 1-7,15-22 * Thu'  # Schedule for every first and third thursday at 6AM CST
+    displayName: AppGW 40
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: '0 13 * * Thu'  # Schedule for every thursday at 8AM CST
+    displayName: LB Health
+    branches:
+      include:
+        - main
+    always: true
+  
+  - cron: '0 14 * * Thu'  # Schedule for every thursday 9AM CST
+    displayName: Empty LB AppGW
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: '0 16 * * Thu'  # Schedule for every thursday at 11AM CST
+    displayName: AppGW Health
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: '0 2 * * *'  # Daily at 8 PM CST
+    displayName: NSG Admin Port Open
+    branches:
+      include:
+        - main
+    always: true
+
+
+variables:
+- name: script
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'AppGW 40') }}:
+    value: ./Main_functions/Reporting/azure_application_gateway_wafv2_listner_limit_details_40.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'AppGW 100') }}:
+    value: ./Main_functions/Reporting/azure_application_gateway_wafv2_listner_limit_details_100.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'LB Health') }}:
+    value: ./Main_functions/Reporting/azure_load_balancer_helth_status.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'AppGW Health') }}:
+    value: ./Main_functions/Reporting/azure_application_gateway_health_status.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Empty LB AppGW') }}:
+    value: ./Main_functions/Reporting/azure_empty_load_balancer_applicatio_gateway.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'NSG Admin Port Open') }}:
+    value: ./Main_functions/Reporting/azure_nsg_admin_port_open_to_public.py
+
+
+steps:
+  - task: CmdLine@2
+    inputs:
+      script: |
+       python --version
+       "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe" -m pip install --upgrade pip
+       "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe" -m pip install -r ./Dependencies/Install_Modules.txt
+
+  - task: AzureCLI@2
+    inputs:
+      azureSubscription: 'pep-prod-bot-automation-spn'
+      scriptType: 'ps'
+      scriptLocation: 'inlineScript'
+      addSpnToEnvironment: true
+      inlineScript: |
+        $env:AZURE_TENANT_ID = $tenantId
+        $env:AZURE_CLIENT_ID = $servicePrincipalId
+        $env:AZURE_CLIENT_SECRET = $servicePrincipalKey
+        $env:AZURE_AUTHORITY_HOST = "login.microsoftonline.com"
+        python ${{ variables.script }}
+
+  - task: SendEmail@1
+    displayName: 'Email Notification on Failure'
+    condition: failed()  # This condition triggers the task only if the previous step failed
+    inputs:
+      To: 'DL-TeamGlobalCloudServicesandSecurity@pepsico.com'
+      From: 'CloudBot@pepsico.com'
+      Subject: 'Pipeline Failed: $(Build.DefinitionName)- $(Build.BuildNumber)'
+      Body: |
+        The Azure Pipeline $(Build.DefinitionName)-$(Build.BuildNumber) has failed.
+        Build URI: $(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)
+      SmtpServer: 'relay.pepsico.com'
+      SmtpPort: '25'
+      UseSSL: false
+

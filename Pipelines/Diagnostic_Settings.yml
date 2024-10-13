@@ -1,0 +1,71 @@
+trigger: none 
+pr: none
+ 
+pool:
+  #vmImage: windows-latest
+  name: Hygien_BOT
+  demands:
+    - agent.name -equals pepwap25520W
+
+ 
+schedules:
+  - cron: '0 11 * * Tue'  # Schedule for every Tuesday 6AM CST
+    displayName: Diagnostic RG
+    branches:
+      include:
+        - main
+    always: true
+    
+  - cron: '0 02 * * Wed'  # Schedule for every Tuesday 9PM CST
+    displayName: Diagnostic SUB
+    branches:
+      include:
+        - main
+    always: true
+ 
+  
+ 
+variables:
+- group: SQL_CR_BLOB_CR
+- name: script
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Diagnostic RG') }}:
+    value: ./Main_functions/Reporting/azure_services_diagnostic_setting_details_RG.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Diagnostic SUB') }}:
+    value: ./Main_functions/Reporting/azure_services_diagnostic_setting_details_SUB.py
+  
+  
+ 
+steps:
+  - task: CmdLine@2
+    inputs:
+      script: |
+       python --version
+       "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe" -m pip install --upgrade pip
+       "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe" -m pip install -r ./Dependencies/Install_Modules.txt
+
+  - task: AzureCLI@2
+    inputs:
+      azureSubscription: 'pep-prod-bot-automation-spn'
+      scriptType: 'ps'
+      scriptLocation: 'inlineScript'
+      addSpnToEnvironment: true
+      inlineScript: |
+        $env:AZURE_TENANT_ID = $tenantId
+        $env:AZURE_CLIENT_ID = $servicePrincipalId
+        $env:AZURE_CLIENT_SECRET = $servicePrincipalKey
+        $env:AZURE_AUTHORITY_HOST = "login.microsoftonline.com"
+        python ${{ variables.script }}
+        
+  - task: SendEmail@1
+    displayName: 'Email Notification on Failure'
+    condition: failed()  # This condition triggers the task only if the previous step failed
+    inputs:
+      To: 'DL-TeamGlobalCloudServicesandSecurity@pepsico.com'
+      From: 'CloudBot@pepsico.com'
+      Subject: 'Pipeline Failed: $(Build.DefinitionName)- $(Build.BuildNumber)'
+      Body: |
+        The Azure Pipeline $(Build.DefinitionName)-$(Build.BuildNumber) has failed.
+        Build URI: $(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)
+      SmtpServer: 'relay.pepsico.com'
+      SmtpPort: '25'
+  #     UseSSL: false

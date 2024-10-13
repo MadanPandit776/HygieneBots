@@ -1,0 +1,114 @@
+trigger: none 
+pr: none
+
+pool:
+  name: Hygien_BOT
+  demands:
+    - agent.name -equals pepwap25520W
+  
+ 
+schedules:
+
+  - cron: '0 11 * * Sat'  # Schedule for every Saturday 6AM CST
+    displayName: 'Allowed Firewall IP'
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: '0 12 * * Sat'  # Schedule for every Saturday 7AM CST
+    displayName: 'Https not Enabled'
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: '0 13 * * Sat'  # Schedule for every Saturday 8AM CST
+    displayName: 'Blob Retention'
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: '0 15 * * Sat'  # Schedule for every Saturday 10AM CST
+    displayName: 'Cors Origin'
+    branches:
+      include:
+        - main
+    always: true
+  
+  - cron: '0 15 * * 6'  # Schedule Weekly Saturday 9 AM CST"
+    displayName: 'Keyvault softdelete'
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: '0 18 * * *'  # Daily at 12 PM CST"
+    displayName: 'Storage blob logging'
+    branches:
+      include:
+        - main
+    always: true
+
+  - cron: '30 02 * * *'  #Daily 8:30 PM CST schedule"
+    displayName: 'Wiz KeyVault Permisions'
+    branches:
+      include:
+        - main
+    always: true
+
+variables:
+- name: script
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Allowed Firewall IP') }}:
+    value: ./Main_functions/Reporting/azure_firewall_allowed_public_ip_in_storage_keyvault_eventhub_SQL.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Https not Enabled') }}:
+    value: ./Main_functions/Reporting/azure_services_https_not_enabled_with_webapp_functionapp_api.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Blob Retention') }}:
+    value: ./Main_functions/Reporting/azure_blob_storage_soft_delete_retention_period_status.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Cors Origin') }}:
+    value: ./Main_functions/Reporting/azure_cors_origin_resource_sharing.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Keyvault softdelete') }}:
+    value: ./Main_functions/Reporting/azure_key_vault_soft_delete_status.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Storage blob logging') }}:
+    value: ./Main_functions/Reporting/azure_storage_account_logging_disabled.py
+  ${{ if eq(variables['Build.CronSchedule.DisplayName'], 'Wiz KeyVault Permisions') }}:
+    value: ./Main_functions/Reporting/azure_keyvault_having_wiz_principle_name.py
+
+
+steps:
+  - task: CmdLine@2
+    displayName: 'Install Dependencies'
+    inputs:
+      script: |
+       python --version
+       "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe" -m pip install --upgrade pip
+       "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe" -m pip install -r ./Dependencies/Install_Modules.txt
+  - task: AzureCLI@2
+    displayName: 'Main Function'
+    inputs:
+      azureSubscription: 'pep-prod-bot-automation-spn'
+      scriptType: 'ps'
+      scriptLocation: 'inlineScript'
+      addSpnToEnvironment: true
+      inlineScript: |
+        $env:AZURE_TENANT_ID = $tenantId
+        $env:AZURE_CLIENT_ID = $servicePrincipalId
+        $env:AZURE_CLIENT_SECRET = $servicePrincipalKey
+        $env:AZURE_AUTHORITY_HOST = "login.microsoftonline.com"
+        python ${{ variables.script }}
+
+
+  - task: SendEmail@1
+    displayName: 'Email Notification on Failure'
+    condition: failed()  # This condition triggers the task only if the previous step failed
+    inputs:
+      To: 'DL-TeamGlobalCloudServicesandSecurity@pepsico.com'
+      From: 'CloudBot@pepsico.com'
+      Subject: 'Pipeline Failed: $(Build.DefinitionName)- $(Build.BuildNumber)'
+      Body: |
+        The Azure Pipeline $(Build.DefinitionName)-$(Build.BuildNumber) has failed.
+        Build URI: $(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)
+      SmtpServer: 'relay.pepsico.com'
+      SmtpPort: '25'
+  #     UseSSL: false

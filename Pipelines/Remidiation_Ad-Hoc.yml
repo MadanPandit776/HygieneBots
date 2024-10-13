@@ -1,0 +1,48 @@
+trigger: none
+pool:
+  #vmImage: windows-latest
+  name: Hygien_BOT
+  demands:
+    - agent.name -equals pepwap25520W
+    
+variables:
+- group: SQL_CR_BLOB_CR
+
+parameters:
+  - name: Subscription_Names
+    type: string
+    default: 'all'
+   
+  - name: Remediating_Bot
+    displayName: 'Remediating BotName'
+    type: string
+    default: 'N/A'
+    values:
+      - 'N/A'
+      - 'azure_network_security_group_ftp_port_open_to_public_remediationmode.py'
+     
+
+jobs:
+- job: Build
+  timeoutInMinutes: 200  # Adjust the timeout as needed, e.g., 120 minutes
+  steps:      
+    - task: CmdLine@2
+      inputs:
+        script: |
+          "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe" -m pip install --upgrade pip
+          "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe" -m pip install -r ./Dependencies/Install_Modules.txt
+      displayName: 'Install Python Modules'
+        
+    - task: AzureCLI@2
+      displayName: 'Execute Remediating Bot'
+      inputs:
+        azureSubscription: 'pep-prod-bot-automation-spn'
+        scriptType: 'ps'
+        scriptLocation: 'inlineScript'
+        addSpnToEnvironment: true
+        inlineScript: |
+          $env:AZURE_TENANT_ID = $tenantId
+          $env:AZURE_CLIENT_ID = $servicePrincipalId
+          $env:AZURE_CLIENT_SECRET = $servicePrincipalKey
+          $env:AZURE_AUTHORITY_HOST = "login.microsoftonline.com"   
+          python ./Main_functions/Remediation/${{ parameters.Remediating_Bot }} ${{ parameters.Subscription_Names }}   
